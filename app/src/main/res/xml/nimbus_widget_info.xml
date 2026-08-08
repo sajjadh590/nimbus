@@ -1,0 +1,9 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp" android:minHeight="110dp"
+    android:targetCellWidth="4" android:targetCellHeight="3"
+    android:maxResizeWidth="420dp" android:maxResizeHeight="420dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_nimbus"
+    android:configure="app.nimbus.widget.StudioActivity"
+    android:widgetCategory="home_screen" />
