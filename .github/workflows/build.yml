@@ -1,6 +1,5 @@
 name: build
 on:
-  push:
   workflow_dispatch:
 jobs:
   apk:
@@ -12,14 +11,21 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+      - name: sdk
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
       - name: gradle
         run: |
           curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o g.zip
           unzip -q g.zip -d /opt/gradle
           echo "/opt/gradle/gradle-8.7/bin" >> $GITHUB_PATH
       - name: build
-        run: gradle assembleDebug --no-daemon
+        run: |
+          if [ -d Nimbus/app ]; then cd Nimbus; fi
+          gradle assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: nimbus-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            **/build/outputs/apk/debug/app-debug.apk
