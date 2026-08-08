@@ -21,23 +21,21 @@ import java.util.*
 import java.util.concurrent.Executors
 import kotlin.math.*
 
-/* ================= Prefs (incl. refresh interval) ================= */
 class Prefs(ctx: Context) {
     private val p = ctx.getSharedPreferences("nimbus", Context.MODE_PRIVATE)
-    var celsius get() = p.getBoolean("celsius", true); set(v) = p.edit().putBoolean("celsius", v).apply()
-    var h24 get() = p.getBoolean("h24", true); set(v) = p.edit().putBoolean("h24", v).apply()
-    var dynamic get() = p.getBoolean("dynamic", true); set(v) = p.edit().putBoolean("dynamic", v).apply()
-    var city get() = p.getString("city", "Mashhad")!!; set(v) = p.edit().putString("city", v).apply()
-    var lat get() = p.getFloat("lat", 36.26f); set(v) = p.edit().putFloat("lat", v).apply()
-    var lon get() = p.getFloat("lon", 59.61f); set(v) = p.edit().putFloat("lon", v).apply()
-    var intervalMin get() = p.getInt("intervalMin", 30); set(v) = p.edit().putInt("intervalMin", v).apply()
+    var celsius: Boolean get() = p.getBoolean("celsius", true); set(v) { p.edit().putBoolean("celsius", v).apply() }
+    var h24: Boolean get() = p.getBoolean("h24", true); set(v) { p.edit().putBoolean("h24", v).apply() }
+    var dynamic: Boolean get() = p.getBoolean("dynamic", true); set(v) { p.edit().putBoolean("dynamic", v).apply() }
+    var city: String get() = p.getString("city", "Mashhad")!!; set(v) { p.edit().putString("city", v).apply() }
+    var lat: Float get() = p.getFloat("lat", 36.26f); set(v) { p.edit().putFloat("lat", v).apply() }
+    var lon: Float get() = p.getFloat("lon", 59.61f); set(v) { p.edit().putFloat("lon", v).apply() }
+    var intervalMin: Int get() = p.getInt("intervalMin", 30); set(v) { p.edit().putInt("intervalMin", v).apply() }
     var modules: Set<String>
         get() = p.getStringSet("modules", setOf("chips", "spark", "sunbar", "fiveday", "moon"))!!
-        set(v) = p.edit().putStringSet("modules", v).apply()
+        set(v) { p.edit().putStringSet("modules", v).apply() }
     fun toggle(m: String, on: Boolean) { val s = modules.toMutableSet(); if (on) s.add(m) else s.remove(m); modules = s }
 }
 
-/* ================= Weather model + Open-Meteo repo ================= */
 data class Day(val ts: Long, val code: Int, val max: Float, val min: Float)
 data class Weather(
     val temp: Float, val feels: Float, val hum: Int, val wind: Float, val windDir: Float,
@@ -59,7 +57,7 @@ object WeatherRepo {
     fun refresh(ctx: Context, cb: (Weather) -> Unit) {
         val cache = File(ctx.cacheDir, "weather.json")
         if (mem == null && cache.exists()) runCatching { mem = parse(cache.readText()) }
-        mem?.let(cb)                                   // instant paint from cache
+        mem?.let(cb)
         exec.execute { runCatching {
             val p = Prefs(ctx)
             val json = get("https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}" +
@@ -73,8 +71,7 @@ object WeatherRepo {
                     .getJSONObject("current").optInt("us_aqi", -1).takeIf { it >= 0 }
             }.getOrNull()
             val w = parse(json, aqi)
-            cache.writeText(json)                      // tiny JSON, eMMC-friendly
-            mem = w; cb(w)
+            cache.writeText(json); mem = w; cb(w)
         } }
     }
 
@@ -87,7 +84,7 @@ object WeatherRepo {
         val c = r.getJSONObject("current"); val h = r.getJSONObject("hourly"); val d = r.getJSONObject("daily")
         val now = System.currentTimeMillis() / 3600000
         val hTs = (0 until h.getJSONArray("time").length()).map { tfmt.parse(h.getJSONArray("time").getString(it))!!.time }
-        val from = (hTs.indexOfFirst { it / 3600000 >= now }).coerceAtLeast(0)
+        val from = hTs.indexOfFirst { it / 3600000 >= now }.coerceAtLeast(0)
         val daily = (0 until d.getJSONArray("time").length()).map {
             Day(dfmt.parse(d.getJSONArray("time").getString(it))!!.time,
                 d.getJSONArray("weather_code").getInt(it),
@@ -130,7 +127,6 @@ fun moonPhaseName(): String {
         ph < 23.99 -> "Last Quarter"; ph < 27.68 -> "Waning Crescent"; else -> "New Moon" }
 }
 
-/* ================= Size solver ================= */
 enum class SizeClass { GLANCE, STRIP, FLAGSHIP, PRO;
     companion object {
         fun from(o: Bundle): SizeClass {
@@ -142,7 +138,6 @@ enum class SizeClass { GLANCE, STRIP, FLAGSHIP, PRO;
     }
 }
 
-/* ================= Renderer (the design, drawn once per refresh) ================= */
 object NimbusRenderer {
     private const val TEXT = 0xFFF7F9FB.toInt(); private const val TEXT2 = 0xFFA9B4C0.toInt()
     private const val TEXT3 = 0xFF8C97A4.toInt(); private const val HAIR = 0x1AFFFFFF
@@ -158,26 +153,22 @@ object NimbusRenderer {
         val night = hour < w.sunriseHour || hour >= w.sunsetHour
         val c = cond(w.code); val acc = accent(c)
 
-        // card clip + dynamic base
         val r = dp(28f)
         cv.clipPath(Path().apply { addRoundRect(RectF(0f, 0f, W.toFloat(), H.toFloat()), r, r, Path.Direction.CW) })
         val base = if (p.dynamic) skyColors(w, hour) else intArrayOf(0xFF0B0D10.toInt(), 0xFF12151A.toInt())
         cv.drawPaint(Paint().apply { shader = LinearGradient(0f, 0f, 0f, H.toFloat(), base, null, Shader.TileMode.CLAMP) })
 
-        // ambient: stars / key light
         if (night) { val rnd = Random(42); repeat(50) {
             cv.drawCircle(rnd.nextFloat() * W, rnd.nextFloat() * H * .7f, dp(.7f),
                 Paint().apply { color = 0xFFFFFFFF.toInt(); alpha = 40 + rnd.nextInt(90) }) } }
         else cv.drawPaint(Paint().apply { shader = RadialGradient(W * .35f, -H * .2f, H.toFloat(), 0x26FFFFFF, 0, Shader.TileMode.CLAMP) })
 
-        // horizon silhouette
         if (sc != SizeClass.GLANCE) cv.drawPath(Path().apply {
             moveTo(0f, H.toFloat()); lineTo(0f, H - dp(34f)); lineTo(W * .18f, H - dp(62f))
             lineTo(W * .34f, H - dp(40f)); lineTo(W * .52f, H - dp(70f)); lineTo(W * .7f, H - dp(38f))
             lineTo(W * .86f, H - dp(58f)); lineTo(W.toFloat(), H - dp(32f)); lineTo(W.toFloat(), H.toFloat()); close()
         }, Paint().apply { color = 0xCC07090C.toInt() })
 
-        // hairline border
         cv.drawRoundRect(RectF(dp(1f), dp(1f), W - dp(1f), H - dp(1f)), r, r,
             Paint().apply { color = HAIR; style = Paint.Style.STROKE; strokeWidth = dp(1.2f) })
 
@@ -194,7 +185,7 @@ object NimbusRenderer {
                 cv.text("Feels ${tempStr(w, p, w.feels)}", W - m, dp(56f), dp(10f), TEXT3, align = Paint.Align.RIGHT)
                 if ("spark" in p.modules) sparkline(cv, w, acc, m, H * .66f, W - 2 * m, dp(24f), d)
             }
-            else -> { // FLAGSHIP + PRO
+            else -> {
                 cv.text(p.city, m, dp(80f), dp(14f), TEXT)
                 cv.text(condName(c), m, dp(96f), dp(11f), TEXT2)
                 if ("chips" in p.modules)
@@ -204,9 +195,8 @@ object NimbusRenderer {
                 cv.text("Feels like ${tempStr(w, p, w.feels)}", m, H * .55f + dp(20f), dp(11f), TEXT2)
                 orb(cv, W * .44f, H * .47f, dp(if (sc == SizeClass.PRO) 24f else 30f), night, acc, d)
                 if ("spark" in p.modules) sparkline(cv, w, acc, W * .60f, H * .45f, W * .36f, dp(22f), d)
-                if (sc == SizeClass.PRO && "fiveday" in p.modules) fiveDay(cv, w, p, m, H * .68f, W - 2 * m, d)
-                if ("moon" in p.modules) {
-                    cv.text(moonPhaseName(), W - m, H - dp(62f), dp(9f), TEXT3, align = Paint.Align.RIGHT) }
+                if (sc == SizeClass.PRO && "fiveday" in p.modules) fiveDay(cv, w, m, H * .68f, W - 2 * m, d)
+                if ("moon" in p.modules) cv.text(moonPhaseName(), W - m, H - dp(62f), dp(9f), TEXT3, align = Paint.Align.RIGHT)
                 if ("sunbar" in p.modules) sunBar(cv, w, m, H - dp(56f), W - 2 * m, dp(42f), d)
             }
         }
@@ -223,7 +213,7 @@ object NimbusRenderer {
     }
 
     private fun tempStr(w: Weather, p: Prefs, v: Float = w.temp) =
-        "${((if (p.celsius) v else v * 9f / 5f + 32f)).toInt()}°"
+        "${(if (p.celsius) v else v * 9f / 5f + 32f).toInt()}°"
 
     private fun Canvas.text(t: String, x: Float, y: Float, size: Float, color: Int,
                             light: Boolean = false, align: Paint.Align = Paint.Align.LEFT) =
@@ -289,13 +279,14 @@ object NimbusRenderer {
     private fun miniIcon(cv: Canvas, c: Cond, x: Float, y: Float, r: Float) {
         val col = accent(c)
         cv.drawCircle(x, y, r, Paint().apply { color = col })
-        if (c == Cond.CLEAR || c == Cond.PARTLY) for (a in 0 until 8) { val t = a * PI / 4
-            cv.drawLine((x + cos(t) * r * 1.4f).toFloat(), (y + sin(t) * r * 1.4f).toFloat(),
-                (x + cos(t) * r * 1.9f).toFloat(), (y + sin(t) * r * 1.9f).toFloat(),
+        if (c == Cond.CLEAR || c == Cond.PARTLY) for (a in 0 until 8) {
+            val t = (a * PI / 4).toFloat()
+            cv.drawLine(x + cos(t) * r * 1.4f, y + sin(t) * r * 1.4f,
+                x + cos(t) * r * 1.9f, y + sin(t) * r * 1.9f,
                 Paint().apply { color = col; strokeWidth = r * .35f }) }
     }
 
-    private fun fiveDay(cv: Canvas, w: Weather, p: Prefs, x: Float, y: Float, wdt: Float, d: Float) {
+    private fun fiveDay(cv: Canvas, w: Weather, x: Float, y: Float, wdt: Float, d: Float) {
         val days = arrayOf("Su","Mo","Tu","We","Th","Fr","Sa")
         w.daily.take(5).forEachIndexed { i, day ->
             val cx = x + i * wdt / 4f
@@ -330,7 +321,6 @@ object NimbusRenderer {
     }
 }
 
-/* ================= Provider + scheduler (your refresh-interval idea) ================= */
 class NimbusWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
         ids.forEach { update(ctx, mgr, it) }; schedule(ctx)
@@ -347,26 +337,26 @@ class NimbusWidgetProvider : AppWidgetProvider() {
             val opts = mgr.getAppWidgetOptions(id); val sc = SizeClass.from(opts); val p = Prefs(ctx)
             val views = RemoteViews(ctx.packageName, R.layout.widget_nimbus)
             views.setFloat(R.id.clock, "setTextSize", when (sc) { SizeClass.GLANCE -> 26f; SizeClass.STRIP -> 30f; else -> 40f })
-            views.setString(R.id.clock, "setFormat24Hour", if (p.h24) "HH:mm" else "h:mm")
-            views.setString(R.id.clock, "setFormat12Hour", "h:mm")
+            views.setCharSequence(R.id.clock, "setFormat24Hour", if (p.h24) "HH:mm" else "h:mm")
+            views.setCharSequence(R.id.clock, "setFormat12Hour", "h:mm")
             views.setOnClickPendingIntent(R.id.art, PendingIntent.getActivity(ctx, 0,
                 Intent(ctx, StudioActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
             mgr.updateAppWidget(id, views)
             val wdp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 250)
             val hdp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 180)
-            WeatherRepo.refresh(ctx) { w ->          // cache-first, network in background
+            WeatherRepo.refresh(ctx) { w ->
                 val v2 = RemoteViews(ctx.packageName, R.layout.widget_nimbus)
                 v2.setImageViewBitmap(R.id.art, NimbusRenderer.render(ctx, w, p, sc, wdp, hdp))
-                v2.setString(R.id.art, "setContentDescription", "${w.temp.toInt()} degrees, ${condName(cond(w.code))}")
+                v2.setCharSequence(R.id.art, "setContentDescription", "${w.temp.toInt()} degrees, ${condName(cond(w.code))}")
                 mgr.updateAppWidget(id, v2)
             }
         }
-        fun schedule(ctx: Context) {                 // user-chosen interval; inexact = battery-safe
+        fun schedule(ctx: Context) {
             val min = Prefs(ctx).intervalMin
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pi = PendingIntent.getBroadcast(ctx, 1, Intent(ctx, NimbusWidgetProvider::class.java)
                 .setAction(A_REFRESH), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            if (min <= 0) am.cancel(pi)              // Manual mode: no alarms at all
+            if (min <= 0) am.cancel(pi)
             else am.setInexactRepeating(AlarmManager.ELAPSED_REALTIME,
                 SystemClock.elapsedRealtime() + min * 60000L, min * 60000L, pi)
         }
@@ -374,7 +364,6 @@ class NimbusWidgetProvider : AppWidgetProvider() {
 }
 class BootReceiver : BroadcastReceiver() { override fun onReceive(ctx: Context, i: Intent) = NimbusWidgetProvider.schedule(ctx) }
 
-/* ================= Studio (modular editor + interval picker) ================= */
 class StudioActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
